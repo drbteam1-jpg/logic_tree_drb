@@ -71,7 +71,7 @@
   #connBadge.standalone #connDot{ background:#D9A22C; }
 
   #standaloneBanner{
-    position:fixed; top:56px; left:0; right:0; z-index:45;
+    position:fixed; top:94px; left:0; right:0; z-index:45;
     background:#FFF3CD; color:#5C4A12; font-size:12.5px;
     padding:8px 16px; text-align:center;
     border-bottom:1px solid #E7CE86;
@@ -81,9 +81,51 @@
     background:#00000012; padding:1px 6px; border-radius:4px;
   }
 
+  /* ---------- Sheet tabs ---------- */
+  #sheetBar{
+    position:fixed; top:56px; left:0; right:0; height:38px;
+    background:#E7EBF3;
+    border-bottom:1px solid #D3D9E5;
+    display:flex; align-items:flex-end; gap:2px;
+    padding:0 10px;
+    z-index:49;
+    overflow-x:auto;
+  }
+  .sheetTab{
+    display:flex; align-items:center; gap:6px;
+    background:#D3D9E5; color:#3C4658;
+    font-size:12.5px; font-weight:600;
+    padding:6px 12px 7px 14px;
+    border-radius:8px 8px 0 0;
+    cursor:pointer;
+    white-space:nowrap;
+    border:1px solid #C3CBDC; border-bottom:none;
+    user-select:none;
+  }
+  .sheetTab.active{
+    background:#fff; color:var(--navy-0);
+    box-shadow:0 -1px 3px rgba(0,0,0,.05);
+  }
+  .sheetTab .tabClose{
+    width:15px; height:15px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    font-size:11px; color:#8B95AA;
+    opacity:0;
+  }
+  .sheetTab:hover .tabClose{ opacity:1; }
+  .sheetTab .tabClose:hover{ background:var(--danger); color:#fff; }
+  #addSheetBtn{
+    display:flex; align-items:center; justify-content:center;
+    width:26px; height:26px; margin-bottom:6px;
+    border-radius:6px; border:1px dashed #A9B4C6;
+    color:#5C6B85; font-size:15px; font-weight:700;
+    cursor:pointer; background:transparent;
+  }
+  #addSheetBtn:hover{ background:#fff; }
+
   /* ---------- Canvas ---------- */
   #viewport{
-    position:absolute; top:56px; left:0; right:0; bottom:0;
+    position:absolute; top:94px; left:0; right:0; bottom:0;
     overflow:auto;
     background-image: radial-gradient(circle, #DCE3EE 1px, transparent 1px);
     background-size: 22px 22px;
@@ -169,6 +211,28 @@
     background:#6B7A99; color:#fff;
     font-size:11px;
   }
+  .node .selectBtn{
+    left:-10px; top:-10px;
+    background:#fff; color:#8B9BB4;
+    border:2px solid #8B9BB4;
+    font-size:11px;
+  }
+  .node.selected{
+    outline:3px solid var(--gold);
+    outline-offset:2px;
+    box-shadow:0 0 0 5px rgba(201,162,39,.22), 0 2px 6px rgba(20,30,50,.18);
+  }
+  .node.selected .selectBtn{
+    opacity:1; transform:scale(1);
+    background:var(--gold); border-color:var(--gold); color:#1B2430;
+  }
+
+  #selectionBar{
+    display:none; align-items:center; gap:6px;
+    background:rgba(255,255,255,.08);
+    padding:5px 10px; border-radius:8px;
+  }
+  #selCount{ color:#fff; font-size:12px; white-space:nowrap; margin-right:2px; }
 
   .node.dragging{ opacity:.85; box-shadow:0 8px 20px rgba(20,30,50,.35); z-index:40; }
 
@@ -202,8 +266,16 @@
   <button class="tbtn" id="importBtn">불러오기</button>
   <input type="file" id="fileInput" accept="application/json">
   <button class="tbtn danger" id="clearBtn">전체 삭제</button>
+  <div id="selectionBar">
+    <span id="selCount"></span>
+    <button class="tbtn" id="groupBtn" title="선택한 노드들을 감싸는 새 상위 카테고리 생성">⬆ 상위 카테고리로 묶기</button>
+    <button class="tbtn" id="alignXBtn" title="선택한 노드들을 같은 세로줄(X)로 맞춤">↕ 세로줄 맞춤</button>
+    <button class="tbtn" id="alignYBtn" title="선택한 노드들을 같은 가로줄(Y)로 맞춤">↔ 가로줄 맞춤</button>
+    <button class="tbtn" id="distributeYBtn" title="선택한 노드들을 세로 방향으로 균등 간격 배치">≡ 간격 균등</button>
+    <button class="tbtn" id="clearSelBtn">선택 해제</button>
+  </div>
   <div class="spacer"></div>
-  <span id="hint">텍스트 클릭=수정 · 왼쪽 손잡이(⠿) 드래그=이동 · 빈 배경 드래그=화면 이동</span>
+  <span id="hint">텍스트 클릭=수정 · 손잡이(⠿) 드래그=이동 · 좌측상단 원(◯) 클릭=다중선택 후 정렬 · 빈 배경 드래그=화면 이동</span>
   <div id="connBadge" class="standalone"><span id="connDot"></span><span id="connText">독립 실행 모드</span></div>
 </div>
 
@@ -211,6 +283,8 @@
   ⚠ Firebase가 설정되지 않아 <b>이 브라우저에서만</b> 보이는 독립 실행 모드입니다.
   실시간 공동편집을 쓰려면 HTML 파일 상단 &lt;script&gt;의 <code>firebaseConfig</code> 값을 채워주세요. (아래 안내 참고)
 </div>
+
+<div id="sheetBar"></div>
 
 <div id="viewport">
   <div id="canvas">
@@ -261,12 +335,17 @@
   };
   // ▲▲▲ 여기까지 ▲▲▲
 
-  // 같은 파일을 여러 "방(room)"으로 나눠 쓰고 싶다면 URL 뒤에 ?room=이름 을 붙이세요.
-  // 예: logic_tree_editor.html?room=압출팀   (안 붙이면 'default' 공용 문서 사용)
+  // 같은 파일을 여러 "작업공간(room)"으로 나눠 쓰고 싶다면 URL 뒤에 ?room=이름 을 붙이세요.
+  // 예: logic_tree_editor.html?room=압출팀   (안 붙이면 'default' 공용 작업공간 사용)
+  // 작업공간 안에서 여러 "시트"(엑셀 탭과 동일 개념)를 만들 수 있습니다.
   const roomId = new URLSearchParams(location.search).get('room') || 'default';
 
   let firebaseReady = false;
-  let dbRef = null;
+  let db = null;
+  let sheetsRef = null;      // 시트 목록(이름/순서) 참조
+  let dataRef = null;        // 현재 선택된 시트의 노드 데이터 참조
+  let sheets = {};           // sheetId -> {name, order}
+  let currentSheetId = null;
   let editingId = null;   // 지금 텍스트를 입력 중인 노드 (원격 갱신으로부터 보호)
   let draggingId = null;  // 지금 드래그 중인 노드 (원격 갱신으로부터 보호)
   let saveTimer = null;
@@ -287,16 +366,111 @@
   }
 
   function saveNow(){
-    if(!firebaseReady || !dbRef) return;
-    dbRef.set({ nodes: nodes, nextId: nextId }).catch(err => {
+    if(!firebaseReady || !dataRef) return;
+    dataRef.set({ nodes: nodes, nextId: nextId }).catch(err => {
       console.error('Firebase 저장 실패:', err);
       setConnBadge('offline', '저장 실패 (연결 확인)');
+    });
+  }
+
+  // ---------------- Sheets (엑셀 탭 방식) ----------------
+  function renderTabs(){
+    const bar = document.getElementById('sheetBar');
+    bar.innerHTML = '';
+    const list = Object.keys(sheets)
+      .map(id => ({ id, ...sheets[id] }))
+      .sort((a, b) => (a.order || 0) - (b.order || 0));
+
+    list.forEach(s => {
+      const tab = document.createElement('div');
+      tab.className = 'sheetTab' + (s.id === currentSheetId ? ' active' : '');
+      tab.innerHTML = '<span class="tabLabel"></span><span class="tabClose" title="시트 삭제">×</span>';
+      tab.querySelector('.tabLabel').textContent = s.name || '(이름없음)';
+      tab.addEventListener('click', (e) => {
+        if(e.target.classList.contains('tabClose')) return;
+        switchSheet(s.id);
+      });
+      tab.addEventListener('dblclick', (e) => {
+        if(e.target.classList.contains('tabClose')) return;
+        const newName = prompt('시트 이름 변경', s.name || '');
+        if(newName && newName.trim()){
+          sheetsRef.child(s.id).update({ name: newName.trim() });
+        }
+      });
+      tab.querySelector('.tabClose').addEventListener('click', (e) => {
+        e.stopPropagation();
+        if(list.length <= 1){
+          alert('마지막 남은 시트는 삭제할 수 없습니다.');
+          return;
+        }
+        if(!confirm('"' + (s.name || '') + '" 시트를 삭제할까요? 되돌릴 수 없습니다.')) return;
+        sheetsRef.child(s.id).remove();
+        db.ref('logicTree/' + roomId + '/data/' + s.id).remove();
+        if(s.id === currentSheetId){
+          const remaining = list.filter(x => x.id !== s.id);
+          if(remaining.length > 0) switchSheet(remaining[0].id);
+        }
+      });
+      bar.appendChild(tab);
+    });
+
+    const addBtn = document.createElement('button');
+    addBtn.id = 'addSheetBtn';
+    addBtn.title = '새 시트 추가';
+    addBtn.textContent = '+';
+    addBtn.addEventListener('click', () => {
+      const name = prompt('새 시트 이름', '시트' + (list.length + 1));
+      if(name === null) return;
+      createSheet(name.trim() || ('시트' + (list.length + 1)));
+    });
+    bar.appendChild(addBtn);
+  }
+
+  function createSheet(name){
+    const id = 's' + Date.now() + Math.floor(Math.random() * 1000);
+    const order = Object.keys(sheets).length;
+    sheetsRef.child(id).set({ name, order }).then(() => {
+      switchSheet(id);
+    });
+  }
+
+  let pendingSeedSheetId = null;  // 새로 만든 빈 시트에 최초 1회 예시데이터를 넣기 위한 플래그
+
+  function switchSheet(id){
+    if(!sheets[id]) return;
+    if(dataRef) dataRef.off();
+    currentSheetId = id;
+    nodes = {}; nextId = 1;
+    selectedIds.clear();
+    canvas.querySelectorAll('.node').forEach(el => el.remove());
+    renderTabs();
+    updateEmptyMsg();
+
+    dataRef = db.ref('logicTree/' + roomId + '/data/' + id);
+    let firstSnapshot = true;
+    dataRef.on('value', (snap) => {
+      const data = snap.val();
+      if(firstSnapshot){
+        firstSnapshot = false;
+        if(id === pendingSeedSheetId && (!data || !data.nodes || Object.keys(data.nodes).length === 0)){
+          pendingSeedSheetId = null;
+          seedDemo();
+          saveNow();
+          return;
+        }
+        pendingSeedSheetId = null;
+      }
+      applyRemoteData(data ? data.nodes : {}, data ? data.nextId : 1);
+    }, (err) => {
+      console.error('시트 데이터 로드 오류:', err);
+      setConnBadge('offline', '연결 오류');
     });
   }
 
   // ---------------- State ----------------
   let nodes = {};      // id -> {id, text, x, y, parentId, w, h}
   let nextId = 1;
+  let selectedIds = new Set();   // 다중 선택된 노드 id (순서 보존)
 
   const canvas = document.getElementById('canvas');
   const linesSvg = document.getElementById('lines');
@@ -366,6 +540,7 @@
       const el = document.getElementById('el-' + id);
       if(el) el.remove();
       delete nodes[id];
+      selectedIds.delete(id);
     });
     updateEmptyMsg();
     redrawLines();
@@ -388,7 +563,8 @@
         '</div>' +
         '<button class="toolbtn addBtn" title="하위 항목 추가">+</button>' +
         '<button class="toolbtn delBtn" title="삭제">×</button>' +
-        '<button class="toolbtn siblingBtn" title="같은 레벨 항목 추가">↔</button>';
+        '<button class="toolbtn siblingBtn" title="같은 레벨 항목 추가">↔</button>' +
+        '<button class="toolbtn selectBtn" title="정렬을 위해 선택">◯</button>';
       canvas.appendChild(el);
 
       const textEl = el.querySelector('.text');
@@ -413,6 +589,9 @@
       el.querySelector('.siblingBtn').addEventListener('click', (e) => {
         e.stopPropagation(); addSibling(id);
       });
+      el.querySelector('.selectBtn').addEventListener('click', (e) => {
+        e.stopPropagation(); toggleSelect(id);
+      });
 
       makeDraggable(el, id);
     }
@@ -435,6 +614,88 @@
 
   function updateEmptyMsg(){
     emptyMsg.style.display = Object.keys(nodes).length === 0 ? 'block' : 'none';
+  }
+
+  // ---------------- Multi-select & alignment ----------------
+  function toggleSelect(id){
+    if(selectedIds.has(id)){
+      selectedIds.delete(id);
+    } else {
+      selectedIds.add(id);
+    }
+    updateSelectionVisual();
+  }
+
+  function updateSelectionVisual(){
+    document.querySelectorAll('.node').forEach(el => el.classList.remove('selected'));
+    selectedIds.forEach(id => {
+      const el = document.getElementById('el-' + id);
+      if(el) el.classList.add('selected');
+    });
+    const bar = document.getElementById('selectionBar');
+    const countEl = document.getElementById('selCount');
+    if(selectedIds.size > 0){
+      bar.style.display = 'flex';
+      countEl.textContent = selectedIds.size + '개 선택됨';
+    } else {
+      bar.style.display = 'none';
+    }
+    const needTwo = selectedIds.size >= 2;
+    document.getElementById('alignXBtn').disabled = !needTwo;
+    document.getElementById('alignYBtn').disabled = !needTwo;
+    document.getElementById('distributeYBtn').disabled = selectedIds.size < 3;
+  }
+
+  function clearSelection(){
+    selectedIds.clear();
+    updateSelectionVisual();
+  }
+
+  // 선택한 노드들을 감싸는 새로운 상위 카테고리 노드를 생성 (대분류 위에 더 큰 분류 추가)
+  function groupSelectedUnderNewParent(){
+    const ids = [...selectedIds];
+    if(ids.length < 1) return;
+    const refParent = nodes[ids[0]].parentId;   // 첫 선택 노드의 기존 부모 자리를 새 노드가 대신 차지
+    const minX = Math.min(...ids.map(id => nodes[id].x));
+    const avgY = ids.reduce((s, id) => s + nodes[id].y, 0) / ids.length;
+    const newId = createNode('새 상위 카테고리', Math.max(0, minX - 260), avgY, refParent);
+    ids.forEach(id => { nodes[id].parentId = newId; renderNode(id); });
+    clearSelection();
+    redrawLines();
+    saveNow();
+  }
+
+  // 선택한 노드들을 "첫 번째로 선택한 노드"의 X좌표에 맞춰 세로로 일직선 정렬
+  function alignSelectedX(){
+    const ids = [...selectedIds];
+    if(ids.length < 2) return;
+    const refX = nodes[ids[0]].x;
+    ids.forEach(id => { nodes[id].x = refX; renderNode(id); });
+    redrawLines();
+    saveNow();
+  }
+
+  // 선택한 노드들을 "첫 번째로 선택한 노드"의 Y좌표에 맞춰 가로로 일직선 정렬
+  function alignSelectedY(){
+    const ids = [...selectedIds];
+    if(ids.length < 2) return;
+    const refY = nodes[ids[0]].y;
+    ids.forEach(id => { nodes[id].y = refY; renderNode(id); });
+    redrawLines();
+    saveNow();
+  }
+
+  // 선택한 노드들을 Y좌표 기준 세로로 균등한 간격이 되도록 재배치 (X는 유지)
+  function distributeSelectedY(){
+    const ids = [...selectedIds];
+    if(ids.length < 3) return;
+    const sorted = ids.slice().sort((a, b) => nodes[a].y - nodes[b].y);
+    const top = nodes[sorted[0]].y;
+    const bottom = nodes[sorted[sorted.length - 1]].y;
+    const step = (bottom - top) / (sorted.length - 1);
+    sorted.forEach((id, i) => { nodes[id].y = top + step * i; renderNode(id); });
+    redrawLines();
+    saveNow();
   }
 
   // ---------------- Connector lines ----------------
@@ -560,6 +821,7 @@
         const el = document.getElementById('el-' + id);
         if(el) el.remove();
         delete nodes[id];
+        selectedIds.delete(id);
       }
     });
 
@@ -626,10 +888,16 @@
     if(Object.keys(nodes).length === 0) return;
     if(confirm('모든 노드를 삭제할까요? 이 작업은 되돌릴 수 없습니다.')){
       nodes = {}; nextId = 1;
+      selectedIds.clear();
       renderAll();
       saveNow();
     }
   });
+  document.getElementById('alignXBtn').addEventListener('click', alignSelectedX);
+  document.getElementById('alignYBtn').addEventListener('click', alignSelectedY);
+  document.getElementById('distributeYBtn').addEventListener('click', distributeSelectedY);
+  document.getElementById('clearSelBtn').addEventListener('click', clearSelection);
+  document.getElementById('groupBtn').addEventListener('click', groupSelectedUnderNewParent);
 
   window.addEventListener('resize', redrawLines);
 
@@ -659,13 +927,16 @@
     const notConfigured = !firebaseConfig || firebaseConfig.apiKey === "YOUR_API_KEY_HERE";
     if(notConfigured){
       setConnBadge('standalone', '독립 실행 모드 (Firebase 미설정)');
+      document.getElementById('sheetBar').style.display = 'none';
+      document.getElementById('viewport').style.top = '56px';
+      document.getElementById('standaloneBanner').style.top = '56px';
       seedDemo();
       return;
     }
     try{
       firebase.initializeApp(firebaseConfig);
-      const db = firebase.database();
-      dbRef = db.ref('logicTree/' + roomId);
+      db = firebase.database();
+      sheetsRef = db.ref('logicTree/' + roomId + '/sheets');
 
       db.ref('.info/connected').on('value', (snap) => {
         if(snap.val() === true){
@@ -675,29 +946,58 @@
         }
       });
 
-      let firstLoad = true;
-      dbRef.on('value', (snap) => {
-        const data = snap.val();
-        if(firstLoad){
-          firstLoad = false;
+      // 1회성으로 시트 목록을 확인해서, 없으면 부트스트랩(마이그레이션 또는 예시데이터 생성)
+      sheetsRef.once('value').then((snap) => {
+        const existing = snap.val();
+        if(existing && Object.keys(existing).length > 0){
           firebaseReady = true;
-          if(!data || !data.nodes || Object.keys(data.nodes).length === 0){
-            seedDemo();      // 이 방에 아직 데이터가 없으면 예시로 시작
-            saveNow();
-            return;
-          }
+          attachSheetsListener();
+          return;
         }
-        applyRemoteData(data.nodes, data.nextId);
-      }, (err) => {
-        console.error('Firebase 연결 오류:', err);
-        setConnBadge('offline', '연결 오류 (설정을 확인하세요)');
-        if(Object.keys(nodes).length === 0) seedDemo();
+        // 시트가 하나도 없음 → 예전 방식(단일 시트) 데이터가 있는지 확인 후 마이그레이션
+        return db.ref('logicTree/' + roomId + '/nodes').once('value').then((legacySnap) => {
+          const legacyNodes = legacySnap.val();
+          const firstId = 's' + Date.now();
+          if(legacyNodes && Object.keys(legacyNodes).length > 0){
+            return db.ref('logicTree/' + roomId + '/nextId').once('value').then((nextSnap) => {
+              return db.ref('logicTree/' + roomId + '/data/' + firstId).set({
+                nodes: legacyNodes, nextId: nextSnap.val() || 1
+              }).then(() => sheetsRef.child(firstId).set({ name: 'Sheet1', order: 0 }));
+            });
+          } else {
+            pendingSeedSheetId = firstId;
+            return sheetsRef.child(firstId).set({ name: 'Sheet1', order: 0 });
+          }
+        }).then(() => {
+          firebaseReady = true;
+          attachSheetsListener();
+        });
+      }).catch((err) => {
+        console.error('Firebase 부트스트랩 오류:', err);
+        setConnBadge('offline', '초기화 오류 (설정을 확인하세요)');
       });
     }catch(e){
       console.error('Firebase 초기화 실패:', e);
       setConnBadge('offline', '초기화 실패 (설정을 확인하세요)');
       seedDemo();
     }
+  }
+
+  function attachSheetsListener(){
+    sheetsRef.on('value', (snap) => {
+      sheets = snap.val() || {};
+      const ids = Object.keys(sheets);
+      if(ids.length === 0) return;
+      if(!currentSheetId || !sheets[currentSheetId]){
+        const sorted = ids.map(id => ({ id, ...sheets[id] })).sort((a,b) => (a.order||0)-(b.order||0));
+        switchSheet(sorted[0].id);
+      } else {
+        renderTabs();
+      }
+    }, (err) => {
+      console.error('시트 목록 오류:', err);
+      setConnBadge('offline', '연결 오류 (설정을 확인하세요)');
+    });
   }
 
   initFirebase();
