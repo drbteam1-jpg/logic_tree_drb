@@ -506,6 +506,7 @@
       clearTimeout(timeoutId);
       isDirty = false;
       updateSaveUI();
+      hideConflictBanner();
       showToast('✅ 저장되었습니다', true);
     }).catch(err => {
       if(settled) return;
