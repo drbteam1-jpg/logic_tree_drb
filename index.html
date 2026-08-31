@@ -70,6 +70,28 @@
   #connBadge.offline #connDot{ background:#E0554B; }
   #connBadge.standalone #connDot{ background:#D9A22C; }
 
+  #saveBtn{
+    background:#4C5A80; border-color:#4C5A80;
+    font-weight:700;
+    transition:background .15s ease;
+  }
+  #saveBtn.dirty{
+    background:var(--gold); border-color:var(--gold); color:#1B2430;
+    animation:pulseSave 1.6s ease-in-out infinite;
+  }
+  @keyframes pulseSave{
+    0%, 100%{ box-shadow:0 0 0 0 rgba(201,162,39,.5); }
+    50%{ box-shadow:0 0 0 6px rgba(201,162,39,0); }
+  }
+
+  #conflictBanner{
+    display:none; align-items:center; gap:12px;
+    position:fixed; top:94px; left:0; right:0; z-index:46;
+    background:#FDE2E1; color:#7A1D16; font-size:12.5px;
+    padding:8px 16px; justify-content:center;
+    border-bottom:1px solid #F3B4AF;
+  }
+
   #standaloneBanner{
     position:fixed; top:94px; left:0; right:0; z-index:45;
     background:#FFF3CD; color:#5C4A12; font-size:12.5px;
@@ -105,6 +127,15 @@
   .sheetTab.active{
     background:#fff; color:var(--navy-0);
     box-shadow:0 -1px 3px rgba(0,0,0,.05);
+  }
+  .sheetTab.dragging{
+    opacity:.4;
+  }
+  .sheetTab.dragOverLeft{
+    box-shadow: inset 3px 0 0 var(--gold);
+  }
+  .sheetTab.dragOverRight{
+    box-shadow: inset -3px 0 0 var(--gold);
   }
   .sheetTab .tabClose{
     width:15px; height:15px; border-radius:50%;
@@ -226,6 +257,13 @@
     opacity:1; transform:scale(1);
     background:var(--gold); border-color:var(--gold); color:#1B2430;
   }
+  .rubberBox{
+    position:absolute;
+    border:1.5px dashed var(--gold);
+    background:rgba(201,162,39,.12);
+    pointer-events:none;
+    z-index:30;
+  }
 
   #selectionBar{
     display:none; align-items:center; gap:6px;
@@ -260,7 +298,8 @@
 
 <div id="toolbar">
   <h1>🌳 로직트리 편집기</h1>
-  <button class="tbtn primary" id="addRootBtn">+ 대분류 추가</button>
+  <button class="tbtn primary" id="saveBtn">💾 저장됨</button>
+  <button class="tbtn" id="addRootBtn">+ 대분류 추가</button>
   <button class="tbtn" id="arrangeBtn">자동 정렬</button>
   <button class="tbtn" id="exportBtn">내보내기 (JSON)</button>
   <button class="tbtn" id="importBtn">불러오기</button>
@@ -275,8 +314,13 @@
     <button class="tbtn" id="clearSelBtn">선택 해제</button>
   </div>
   <div class="spacer"></div>
-  <span id="hint">텍스트 클릭=수정 · 손잡이(⠿) 드래그=이동 · 좌측상단 원(◯) 클릭=다중선택 후 정렬 · 빈 배경 드래그=화면 이동</span>
+  <span id="hint">텍스트 클릭=수정 · 손잡이(⠿) 드래그=이동(선택된 여러개면 함께 이동) · Shift+드래그=영역선택 · 원(◯)=개별선택 · 빈 배경 드래그=화면 이동 · <b>편집 후 반드시 "저장" 버튼을 눌러야 다른 사람에게 반영됩니다</b></span>
   <div id="connBadge" class="standalone"><span id="connDot"></span><span id="connText">독립 실행 모드</span></div>
+</div>
+
+<div id="conflictBanner">
+  ⚠ 다른 사용자가 이 시트를 저장했습니다. 지금 <b>저장</b>을 누르면 그 변경사항을 덮어씁니다.
+  <button class="tbtn" id="conflictReloadBtn">새로고침해서 최신 내용 보기</button>
 </div>
 
 <div id="standaloneBanner">
@@ -347,8 +391,8 @@
   let sheets = {};           // sheetId -> {name, order}
   let currentSheetId = null;
   let editingId = null;   // 지금 텍스트를 입력 중인 노드 (원격 갱신으로부터 보호)
-  let draggingId = null;  // 지금 드래그 중인 노드 (원격 갱신으로부터 보호)
-  let saveTimer = null;
+  let draggingIds = new Set();  // 지금 드래그 중인 노드들 (원격 갱신으로부터 보호)
+  let isDirty = false;    // 저장 안 된 로컬 변경사항이 있는지
 
   function setConnBadge(state, text){
     const badge = document.getElementById('connBadge');
@@ -359,21 +403,63 @@
       (state === 'standalone') ? 'block' : 'none';
   }
 
-  function scheduleSave(delay){
-    if(!firebaseReady) return;
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(saveNow, delay || 300);
+  // 로컬에 변경사항이 생겼음을 표시 (자동 저장하지 않음 - 저장 버튼을 눌러야 실제 반영됨)
+  function markDirty(){
+    isDirty = true;
+    updateSaveUI();
+  }
+
+  function updateSaveUI(){
+    const btn = document.getElementById('saveBtn');
+    if(!btn) return;
+    if(isDirty){
+      btn.classList.add('dirty');
+      btn.textContent = '\ud83d\udcbe \uc800\uc7a5 (\ubcc0\uacbd\uc0ac\ud56d \uc788\uc74c)';
+    } else {
+      btn.classList.remove('dirty');
+      btn.textContent = '\ud83d\udcbe \uc800\uc7a5\ub428';
+    }
   }
 
   function saveNow(){
-    if(!firebaseReady || !dataRef) return;
-    dataRef.set({ nodes: nodes, nextId: nextId }).catch(err => {
+    if(!firebaseReady || !dataRef){
+      if(!firebaseReady){
+        alert('Firebase가 설정되지 않은 독립 실행 모드입니다. 이 상태에서는 저장이 서버에 반영되지 않고, 새로고침하면 사라집니다.');
+      }
+      return;
+    }
+    dataRef.set({ nodes: nodes, nextId: nextId }).then(() => {
+      isDirty = false;
+      updateSaveUI();
+    }).catch(err => {
       console.error('Firebase 저장 실패:', err);
       setConnBadge('offline', '저장 실패 (연결 확인)');
+      alert('저장에 실패했습니다. 인터넷 연결을 확인한 뒤 다시 시도해주세요.');
     });
   }
 
+  // 다른 사람이 이 시트를 변경한 뒤 저장했는데, 내 쪽에 아직 저장 안 한 변경사항이 있을 때 표시
+  function showConflictBanner(){
+    const el = document.getElementById('conflictBanner');
+    if(el) el.style.display = 'flex';
+  }
+  function hideConflictBanner(){
+    const el = document.getElementById('conflictBanner');
+    if(el) el.style.display = 'none';
+  }
+
+  // 브라우저/탭을 닫거나 새로고침 할 때, 저장 안 된 변경사항이 있으면 확인창 표시
+  window.addEventListener('beforeunload', (e) => {
+    if(isDirty && firebaseReady){
+      e.preventDefault();
+      e.returnValue = '';
+      return '';
+    }
+  });
+
   // ---------------- Sheets (엑셀 탭 방식) ----------------
+  let draggedTabId = null;
+
   function renderTabs(){
     const bar = document.getElementById('sheetBar');
     bar.innerHTML = '';
@@ -384,6 +470,7 @@
     list.forEach(s => {
       const tab = document.createElement('div');
       tab.className = 'sheetTab' + (s.id === currentSheetId ? ' active' : '');
+      tab.draggable = true;
       tab.innerHTML = '<span class="tabLabel"></span><span class="tabClose" title="시트 삭제">×</span>';
       tab.querySelector('.tabLabel').textContent = s.name || '(이름없음)';
       tab.addEventListener('click', (e) => {
@@ -403,7 +490,14 @@
           alert('마지막 남은 시트는 삭제할 수 없습니다.');
           return;
         }
-        if(!confirm('"' + (s.name || '') + '" 시트를 삭제할까요? 되돌릴 수 없습니다.')) return;
+        const typed = prompt(
+          '"' + (s.name || '') + '" 시트를 삭제하려면, 시트 이름을 정확히 입력하세요.\n(실수 삭제 방지용 확인입니다. 되돌릴 수 없습니다.)'
+        );
+        if(typed === null) return;
+        if(typed.trim() !== (s.name || '').trim()){
+          alert('입력한 이름이 일치하지 않아 삭제가 취소되었습니다.');
+          return;
+        }
         sheetsRef.child(s.id).remove();
         db.ref('logicTree/' + roomId + '/data/' + s.id).remove();
         if(s.id === currentSheetId){
@@ -411,6 +505,50 @@
           if(remaining.length > 0) switchSheet(remaining[0].id);
         }
       });
+
+      // ---- 탭 드래그로 순서 변경 ----
+      tab.addEventListener('dragstart', (e) => {
+        draggedTabId = s.id;
+        tab.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', s.id); } catch(err){}
+      });
+      tab.addEventListener('dragend', () => {
+        tab.classList.remove('dragging');
+        bar.querySelectorAll('.sheetTab').forEach(t => t.classList.remove('dragOverLeft', 'dragOverRight'));
+        draggedTabId = null;
+      });
+      tab.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        if(!draggedTabId || draggedTabId === s.id) return;
+        const rect = tab.getBoundingClientRect();
+        const before = (e.clientX - rect.left) < rect.width / 2;
+        tab.classList.toggle('dragOverLeft', before);
+        tab.classList.toggle('dragOverRight', !before);
+      });
+      tab.addEventListener('dragleave', () => {
+        tab.classList.remove('dragOverLeft', 'dragOverRight');
+      });
+      tab.addEventListener('drop', (e) => {
+        e.preventDefault();
+        tab.classList.remove('dragOverLeft', 'dragOverRight');
+        if(!draggedTabId || draggedTabId === s.id) return;
+
+        const rect = tab.getBoundingClientRect();
+        const before = (e.clientX - rect.left) < rect.width / 2;
+
+        const newOrder = list.filter(x => x.id !== draggedTabId).map(x => x.id);
+        const targetIdx = newOrder.indexOf(s.id);
+        newOrder.splice(before ? targetIdx : targetIdx + 1, 0, draggedTabId);
+
+        const updates = {};
+        newOrder.forEach((id, i) => {
+          updates['logicTree/' + roomId + '/sheets/' + id + '/order'] = i;
+        });
+        db.ref().update(updates);
+        draggedTabId = null;
+      });
+
       bar.appendChild(tab);
     });
 
@@ -438,10 +576,16 @@
 
   function switchSheet(id){
     if(!sheets[id]) return;
+    if(isDirty){
+      if(!confirm('저장하지 않은 변경사항이 있습니다. 저장하지 않고 다른 시트로 이동하면 변경사항이 사라집니다. 계속할까요?')) return;
+    }
     if(dataRef) dataRef.off();
     currentSheetId = id;
     nodes = {}; nextId = 1;
     selectedIds.clear();
+    isDirty = false;
+    updateSaveUI();
+    hideConflictBanner();
     canvas.querySelectorAll('.node').forEach(el => el.remove());
     renderTabs();
     updateEmptyMsg();
@@ -459,6 +603,16 @@
           return;
         }
         pendingSeedSheetId = null;
+        applyRemoteData(data ? data.nodes : {}, data ? data.nextId : 1);
+        isDirty = false;
+        updateSaveUI();
+        return;
+      }
+      // 이미 저장 안 한 로컬 변경사항이 있는 상태에서 다른 사람이 저장했다면,
+      // 자동으로 덮어쓰지 않고 경고 배너만 표시 (수동 저장 모델 유지)
+      if(isDirty){
+        showConflictBanner();
+        return;
       }
       applyRemoteData(data ? data.nodes : {}, data ? data.nextId : 1);
     }, (err) => {
@@ -496,7 +650,7 @@
     nodes[id] = { id, text: text || '', x, y, parentId: parentId || null };
     renderNode(id);
     updateEmptyMsg();
-    scheduleSave(150);
+    markDirty();
     return id;
   }
 
@@ -544,7 +698,7 @@
     });
     updateEmptyMsg();
     redrawLines();
-    saveNow();
+    markDirty();
   }
 
   // ---------------- Rendering ----------------
@@ -571,12 +725,11 @@
       textEl.addEventListener('focus', () => { editingId = id; });
       textEl.addEventListener('input', () => {
         nodes[id].text = textEl.innerText;
-        scheduleSave(500);
+        markDirty();
       });
       textEl.addEventListener('blur', () => {
         if(editingId === id) editingId = null;
         redrawLines();
-        saveNow();
       });
       textEl.addEventListener('pointerdown', e => e.stopPropagation());
 
@@ -662,7 +815,7 @@
     ids.forEach(id => { nodes[id].parentId = newId; renderNode(id); });
     clearSelection();
     redrawLines();
-    saveNow();
+    markDirty();
   }
 
   // 선택한 노드들을 "첫 번째로 선택한 노드"의 X좌표에 맞춰 세로로 일직선 정렬
@@ -672,7 +825,7 @@
     const refX = nodes[ids[0]].x;
     ids.forEach(id => { nodes[id].x = refX; renderNode(id); });
     redrawLines();
-    saveNow();
+    markDirty();
   }
 
   // 선택한 노드들을 "첫 번째로 선택한 노드"의 Y좌표에 맞춰 가로로 일직선 정렬
@@ -682,7 +835,7 @@
     const refY = nodes[ids[0]].y;
     ids.forEach(id => { nodes[id].y = refY; renderNode(id); });
     redrawLines();
-    saveNow();
+    markDirty();
   }
 
   // 선택한 노드들을 Y좌표 기준 세로로 균등한 간격이 되도록 재배치 (X는 유지)
@@ -695,7 +848,7 @@
     const step = (bottom - top) / (sorted.length - 1);
     sorted.forEach((id, i) => { nodes[id].y = top + step * i; renderNode(id); });
     redrawLines();
-    saveNow();
+    markDirty();
   }
 
   // ---------------- Connector lines ----------------
@@ -729,57 +882,133 @@
   // ---------------- Dragging nodes ----------------
   function makeDraggable(el, id){
     const handle = el.querySelector('.handle');
-    let startPX, startPY, startNX, startNY, dragging = false;
+    let startPX, startPY, dragging = false;
+    let groupStart = null;   // { nodeId: {x,y}, ... } - 이번 드래그로 함께 움직일 노드들의 시작좌표
 
     handle.addEventListener('pointerdown', (e) => {
       e.stopPropagation();
       dragging = true;
-      draggingId = id;
       el.classList.add('dragging');
       startPX = e.clientX; startPY = e.clientY;
-      startNX = nodes[id].x; startNY = nodes[id].y;
+
+      // 지금 잡은 노드가 "이미 다중 선택된 그룹"의 일원이면 그룹 전체를 함께 이동,
+      // 아니면 이 노드 하나만 이동 (기존과 동일 동작 유지)
+      const moveIds = (selectedIds.has(id) && selectedIds.size > 1) ? [...selectedIds] : [id];
+      groupStart = {};
+      draggingIds = new Set(moveIds);
+      moveIds.forEach(mid => {
+        if(!nodes[mid]) return;
+        groupStart[mid] = { x: nodes[mid].x, y: nodes[mid].y };
+        const mEl = document.getElementById('el-' + mid);
+        if(mEl) mEl.classList.add('dragging');
+      });
+
       handle.setPointerCapture(e.pointerId);
     });
     handle.addEventListener('pointermove', (e) => {
-      if(!dragging) return;
+      if(!dragging || !groupStart) return;
       const dx = e.clientX - startPX;
       const dy = e.clientY - startPY;
-      nodes[id].x = Math.max(0, startNX + dx);
-      nodes[id].y = Math.max(0, startNY + dy);
-      el.style.left = nodes[id].x + 'px';
-      el.style.top = nodes[id].y + 'px';
+      Object.keys(groupStart).forEach(mid => {
+        if(!nodes[mid]) return;
+        nodes[mid].x = Math.max(0, groupStart[mid].x + dx);
+        nodes[mid].y = Math.max(0, groupStart[mid].y + dy);
+        const mEl = document.getElementById('el-' + mid);
+        if(mEl){ mEl.style.left = nodes[mid].x + 'px'; mEl.style.top = nodes[mid].y + 'px'; }
+      });
       redrawLines();
-      scheduleSave(250);
+      markDirty();
     });
     function endDrag(e){
       if(!dragging) return;
       dragging = false;
-      if(draggingId === id) draggingId = null;
+      if(groupStart){
+        Object.keys(groupStart).forEach(mid => {
+          const mEl = document.getElementById('el-' + mid);
+          if(mEl) mEl.classList.remove('dragging');
+        });
+      }
+      groupStart = null;
+      draggingIds.clear();
       el.classList.remove('dragging');
-      saveNow();
     }
     handle.addEventListener('pointerup', endDrag);
     handle.addEventListener('pointercancel', endDrag);
   }
 
-  // ---------------- Canvas panning ----------------
+  // ---------------- Canvas panning & rubber-band multi-select ----------------
   (function enablePan(){
     let panning = false, startX, startY, startLeft, startTop;
+    let rubberBanding = false, rubberStartX, rubberStartY, rubberEl = null;
+
     viewport.addEventListener('pointerdown', (e) => {
       if(e.target !== viewport && e.target !== canvas && e.target.id !== 'lines' && e.target.id !== 'emptyMsg') return;
+
+      const vpRect = viewport.getBoundingClientRect();
+      const canvasX = e.clientX - vpRect.left + viewport.scrollLeft;
+      const canvasY = e.clientY - vpRect.top + viewport.scrollTop;
+
+      if(e.shiftKey){
+        // Shift + 드래그 = 사각형으로 여러 노드 한번에 선택
+        rubberBanding = true;
+        rubberStartX = canvasX; rubberStartY = canvasY;
+        rubberEl = document.createElement('div');
+        rubberEl.className = 'rubberBox';
+        rubberEl.style.left = canvasX + 'px';
+        rubberEl.style.top = canvasY + 'px';
+        rubberEl.style.width = '0px';
+        rubberEl.style.height = '0px';
+        canvas.appendChild(rubberEl);
+        return;
+      }
+
       panning = true;
       viewport.classList.add('panning');
       startX = e.clientX; startY = e.clientY;
       startLeft = viewport.scrollLeft; startTop = viewport.scrollTop;
     });
     window.addEventListener('pointermove', (e) => {
-      if(!panning) return;
-      viewport.scrollLeft = startLeft - (e.clientX - startX);
-      viewport.scrollTop = startTop - (e.clientY - startY);
+      if(panning){
+        viewport.scrollLeft = startLeft - (e.clientX - startX);
+        viewport.scrollTop = startTop - (e.clientY - startY);
+        return;
+      }
+      if(rubberBanding && rubberEl){
+        const vpRect = viewport.getBoundingClientRect();
+        const curX = e.clientX - vpRect.left + viewport.scrollLeft;
+        const curY = e.clientY - vpRect.top + viewport.scrollTop;
+        const left = Math.min(curX, rubberStartX);
+        const top = Math.min(curY, rubberStartY);
+        rubberEl.style.left = left + 'px';
+        rubberEl.style.top = top + 'px';
+        rubberEl.style.width = Math.abs(curX - rubberStartX) + 'px';
+        rubberEl.style.height = Math.abs(curY - rubberStartY) + 'px';
+      }
     });
     window.addEventListener('pointerup', () => {
       panning = false;
       viewport.classList.remove('panning');
+
+      if(rubberBanding && rubberEl){
+        const boxLeft = parseFloat(rubberEl.style.left) || 0;
+        const boxTop = parseFloat(rubberEl.style.top) || 0;
+        const boxRight = boxLeft + (parseFloat(rubberEl.style.width) || 0);
+        const boxBottom = boxTop + (parseFloat(rubberEl.style.height) || 0);
+
+        Object.keys(nodes).forEach(id => {
+          const n = nodes[id];
+          const el = document.getElementById('el-' + id);
+          if(!n || !el) return;
+          const w = el.offsetWidth, h = el.offsetHeight;
+          const intersects = n.x < boxRight && (n.x + w) > boxLeft && n.y < boxBottom && (n.y + h) > boxTop;
+          if(intersects) selectedIds.add(id);
+        });
+        updateSelectionVisual();
+
+        rubberEl.remove();
+        rubberEl = null;
+        rubberBanding = false;
+      }
     });
   })();
 
@@ -808,7 +1037,7 @@
     roots.forEach(r => layout(r.id, 0));
     Object.keys(nodes).forEach(renderNode);
     redrawLines();
-    saveNow();
+    markDirty();
   }
 
   // ---------------- Remote data merge (Firebase) ----------------
@@ -817,7 +1046,7 @@
 
     // remove local nodes that no longer exist remotely
     Object.keys(nodes).forEach(id => {
-      if(!remoteNodes[id] && id !== editingId && id !== draggingId){
+      if(!remoteNodes[id] && id !== editingId && !draggingIds.has(id)){
         const el = document.getElementById('el-' + id);
         if(el) el.remove();
         delete nodes[id];
@@ -832,7 +1061,7 @@
       if(id === editingId){
         // keep local text (user is typing), accept structural fields only
         nodes[id] = { id, text: local ? local.text : r.text, x: r.x, y: r.y, parentId: r.parentId };
-      } else if(id === draggingId){
+      } else if(draggingIds.has(id)){
         // keep local position (user is dragging), accept text
         nodes[id] = { id, text: r.text, x: local ? local.x : r.x, y: local ? local.y : r.y, parentId: r.parentId };
       } else {
@@ -898,6 +1127,8 @@
   document.getElementById('distributeYBtn').addEventListener('click', distributeSelectedY);
   document.getElementById('clearSelBtn').addEventListener('click', clearSelection);
   document.getElementById('groupBtn').addEventListener('click', groupSelectedUnderNewParent);
+  document.getElementById('saveBtn').addEventListener('click', saveNow);
+  document.getElementById('conflictReloadBtn').addEventListener('click', () => location.reload());
 
   window.addEventListener('resize', redrawLines);
 
