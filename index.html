@@ -463,6 +463,18 @@
 
     showToast('저장 중...', true);
 
+    // 안전장치: undefined 값이 섞여 있으면 Firebase가 저장 자체를 거부하므로,
+    // JSON 왕복으로 undefined를 전부 제거(자동으로 사라짐)한 뒤 저장
+    let payload;
+    try{
+      payload = JSON.parse(JSON.stringify({ nodes: nodes, nextId: nextId }));
+    }catch(e){
+      console.error('저장 데이터 정리 실패:', e);
+      showToast('❌ 저장 데이터에 문제가 있습니다', false);
+      downloadEmergencyBackup();
+      return;
+    }
+
     // 오프라인 등으로 Firebase 응답이 영원히 안 올 수도 있어, 8초 안에 응답 없으면 실패로 간주
     let settled = false;
     const timeoutId = setTimeout(() => {
@@ -474,7 +486,21 @@
       showToast('❌ 저장 응답 없음(네트워크 확인) — 백업 파일을 다운로드했습니다', false);
     }, 8000);
 
-    dataRef.set({ nodes: nodes, nextId: nextId }).then(() => {
+    let setPromise;
+    try{
+      setPromise = dataRef.set(payload);
+    }catch(syncErr){
+      // Firebase는 유효성 오류(예: undefined 포함)를 Promise가 아니라 동기적으로 throw하기도 함
+      clearTimeout(timeoutId);
+      settled = true;
+      console.error('Firebase 저장 실패(동기 오류):', syncErr);
+      setConnBadge('offline', '저장 실패');
+      downloadEmergencyBackup();
+      showToast('❌ 저장 실패(데이터 오류) — 백업 파일을 다운로드했습니다', false);
+      return;
+    }
+
+    setPromise.then(() => {
       if(settled) return;
       settled = true;
       clearTimeout(timeoutId);
@@ -1205,14 +1231,18 @@
     Object.keys(remoteNodes).forEach(id => {
       const r = remoteNodes[id];
       const local = nodes[id];
+      // Firebase는 null 값을 가진 속성을 저장 시 자동으로 지우기 때문에,
+      // 최상위(부모 없음) 노드는 원격에서 읽어올 때 parentId 필드 자체가 없어서
+      // undefined로 들어올 수 있음 -> 반드시 null로 명시적으로 되돌려줘야 함
+      // (그렇지 않으면 다음 저장 시 "undefined는 저장 불가" 오류가 발생함)
       if(id === editingId){
         // keep local text (user is typing), accept structural fields only
-        nodes[id] = { id, text: local ? local.text : r.text, x: r.x, y: r.y, parentId: r.parentId };
+        nodes[id] = { id, text: local ? local.text : r.text, x: r.x, y: r.y, parentId: r.parentId || null };
       } else if(draggingIds.has(id)){
         // keep local position (user is dragging), accept text
-        nodes[id] = { id, text: r.text, x: local ? local.x : r.x, y: local ? local.y : r.y, parentId: r.parentId };
+        nodes[id] = { id, text: r.text, x: local ? local.x : r.x, y: local ? local.y : r.y, parentId: r.parentId || null };
       } else {
-        nodes[id] = { id, text: r.text, x: r.x, y: r.y, parentId: r.parentId };
+        nodes[id] = { id, text: r.text, x: r.x, y: r.y, parentId: r.parentId || null };
       }
     });
 
