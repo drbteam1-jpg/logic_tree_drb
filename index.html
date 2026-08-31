@@ -460,14 +460,52 @@
       }
       return;
     }
+
+    showToast('저장 중...', true);
+
+    // 오프라인 등으로 Firebase 응답이 영원히 안 올 수도 있어, 8초 안에 응답 없으면 실패로 간주
+    let settled = false;
+    const timeoutId = setTimeout(() => {
+      if(settled) return;
+      settled = true;
+      console.error('Firebase 저장 타임아웃(8초)');
+      setConnBadge('offline', '저장 응답 없음');
+      downloadEmergencyBackup();
+      showToast('❌ 저장 응답 없음(네트워크 확인) — 백업 파일을 다운로드했습니다', false);
+    }, 8000);
+
     dataRef.set({ nodes: nodes, nextId: nextId }).then(() => {
+      if(settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
       isDirty = false;
       updateSaveUI();
       showToast('✅ 저장되었습니다', true);
     }).catch(err => {
+      if(settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
       console.error('Firebase 저장 실패:', err);
-      setConnBadge('offline', '저장 실패 (연결 확인)');
-      showToast('❌ 저장 실패 — 인터넷 연결을 확인해주세요', false);
+      setConnBadge('offline', '저장 실패');
+      downloadEmergencyBackup();
+      const code = (err && err.code) ? err.code : (err && err.message) || '알 수 없는 오류';
+      if(String(code).toLowerCase().includes('permission')){
+        showToast('❌ 저장 실패(권한거부) — 백업 파일을 다운로드했습니다', false);
+        alert(
+          '저장이 거부되었습니다 (PERMISSION_DENIED).\n\n' +
+          '가장 흔한 원인은 Firebase Realtime Database가 "테스트 모드"로 설정되어 있고, ' +
+          '기본 30일 만료 기한이 지나 자동으로 읽기/쓰기가 차단된 경우입니다.\n\n' +
+          '해결 방법:\n' +
+          '1) Firebase 콘솔 접속 → Realtime Database → "규칙(Rules)" 탭 이동\n' +
+          '2) 아래처럼 만료조건 없이 바꾸고 "게시(Publish)":\n' +
+          '   { "rules": { ".read": true, ".write": true } }\n' +
+          '3) 저장 후 다시 이 화면에서 저장 버튼을 눌러보세요.\n\n' +
+          '지금 작업하신 내용은 방금 백업 JSON 파일로 다운로드되었으니, ' +
+          '규칙을 고친 뒤 "불러오기" 버튼으로 다시 불러와서 저장하시면 됩니다.'
+        );
+      } else {
+        showToast('❌ 저장 실패(' + code + ') — 백업 파일을 다운로드했습니다', false);
+      }
     });
   }
 
@@ -1192,6 +1230,21 @@
     a.href = URL.createObjectURL(blob);
     a.download = 'logic_tree.json';
     a.click();
+  }
+
+  // 저장 실패 시 자동으로 백업 파일을 다운로드해서 작업 내용 유실을 방지
+  function downloadEmergencyBackup(){
+    try{
+      const data = { nodes, nextId, savedSheet: (sheets[currentSheetId] && sheets[currentSheetId].name) || currentSheetId };
+      const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'logic_tree_backup_' + ts + '.json';
+      a.click();
+    }catch(e){
+      console.error('백업 다운로드도 실패:', e);
+    }
   }
 
   function importJson(file){
